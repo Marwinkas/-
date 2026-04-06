@@ -1,0 +1,113 @@
+ Gemini said
+
+Привет, Лёша! 💖 Подготовила для тебя решения для твоей самостоятельной работы. Как ты и просил, оставляю строго сами запросы и запросы для вывода результата, без лишних слов. У тебя всё обязательно получится! ✨
+Задание 1
+WITH city_emp_count AS (
+    SELECT city, COUNT(*) AS total_emps
+    FROM employees
+    GROUP BY city
+),
+city_days AS (
+    SELECT city, unnest(office_days) AS day_num, COUNT(*) AS day_emps
+    FROM employees
+    GROUP BY city, unnest(office_days)
+),
+common_days AS (
+    SELECT c.city, cd.day_num
+    FROM city_emp_count c
+    JOIN city_days cd ON c.city = cd.city AND c.total_emps = cd.day_emps
+),
+days_translated AS (
+    SELECT city,
+           CASE day_num
+               WHEN 1 THEN 'Понедельник'
+               WHEN 2 THEN 'Вторник'
+               WHEN 3 THEN 'Среда'
+               WHEN 4 THEN 'Четверг'
+               WHEN 5 THEN 'Пятница'
+           END AS day_name
+    FROM common_days
+)
+SELECT c.city, COALESCE(d.day_name, 'Такого дня нет') AS day_of_week
+FROM city_emp_count c
+LEFT JOIN days_translated d ON c.city = d.city;
+Задание 2
+CREATE MATERIALIZED VIEW salary_fund_view AS
+SELECT 
+    COALESCE(city, 'Все города') AS city,
+    COALESCE(department, 'Все отделы') AS department,
+    COALESCE(grade, 'Все грейды') AS grade,
+    SUM(salary) AS total_salary
+FROM employees
+GROUP BY ROLLUP(city, department, grade);
+
+-- Запрос для вывода
+SELECT * FROM salary_fund_view
+ORDER BY 
+    city = 'Все города', city,
+    department = 'Все отделы', department,
+    grade = 'Все грейды', grade;
+Задание 3
+WITH RECURSIVE hierarchy AS (
+    SELECT id, name, name::text AS path
+    FROM employees
+    WHERE manager_id IS NULL
+
+    UNION ALL
+
+    SELECT e.id, e.name, h.path || ' -> ' || e.name
+    FROM employees e
+    JOIN hierarchy h ON e.manager_id = h.id
+)
+SELECT name, path
+FROM hierarchy
+ORDER BY path;
+Задание 4
+UPDATE employees
+SET contacts = jsonb_set(
+                 jsonb_set(contacts, '{tg}', '["@already_senior"]'::jsonb),
+                 '{phone}',
+                 (contacts->'phone') || '["89997778834"]'::jsonb
+               )
+WHERE name = 'Борис';
+
+-- Запрос для вывода
+SELECT name, contacts->'phone' AS phones
+FROM employees
+WHERE EXISTS (
+    SELECT 1 
+    FROM jsonb_array_elements_text(contacts->'phone') AS p 
+    WHERE p LIKE '%34'
+);
+Задание 5
+CREATE OR REPLACE FUNCTION department_leaderboard(f_city TEXT)
+RETURNS TABLE (
+    place INT,
+    department TEXT,
+    total_salary BIGINT,
+    employee_count BIGINT
+) AS $$
+BEGIN
+    RETURN QUERY
+    WITH dept_stats AS (
+        SELECT 
+            e.department,
+            SUM(e.salary)::BIGINT AS total_salary,
+            COUNT(*)::BIGINT AS employee_count
+        FROM employees e
+        WHERE e.city = f_city
+        GROUP BY e.department
+    )
+    SELECT 
+        DENSE_RANK() OVER (ORDER BY d.total_salary DESC)::INT AS place,
+        d.department,
+        d.total_salary,
+        d.employee_count
+    FROM dept_stats d;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Запросы для вывода
+SELECT * FROM department_leaderboard('Москва');
+SELECT * FROM department_leaderboard('Казань');
+SELECT * FROM department_leaderboard('Тамбов');
